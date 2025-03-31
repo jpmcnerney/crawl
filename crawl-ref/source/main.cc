@@ -2038,15 +2038,12 @@ public:
 
 class OptionsMenu : public Menu
 {
-// this could be easily generalized for other menus that select among commands
-// if it's ever needed
 public:
     class CmdMenuEntry : public MenuEntry
     {
     public:
         CmdMenuEntry(string label, MenuEntryLevel _level, int hotk=0,
-                                                command_type _cmd=CMD_NO_CMD,
-                                                bool _uses_popup=true)
+                     command_type _cmd=CMD_NO_CMD, bool _uses_popup=true)
             : MenuEntry(label, _level, 1, hotk), cmd(_cmd),
               uses_popup(_uses_popup)
         {
@@ -2058,14 +2055,38 @@ public:
         bool uses_popup;
     };
 
+    struct OptionEntry : public MenuEntry
+    {
+        std::string name;
+        bool* value;
+
+        OptionEntry(const std::string& name, bool* val)
+            : MenuEntry("", MEL_ITEM), name(name), value(val)
+        {
+            update_label(false);
+        }
+
+        void toggle()
+        {
+            *value = !*value;
+        }
+
+        void update_label(bool hovered)
+        {
+            std::string box = *value ? "[x] " : "[ ] ";
+            std::string color = hovered ? "<white>" : "<lightgray>";
+            this->text = color + box + name + "</" + (hovered ? "white" : "lightgray") + ">";
+        }
+    };
+
     command_type cmd;
+    bool opt1 = true;
+    bool opt2 = false;
+    bool opt3 = true;
+    int prev_hover = -1;
+
     OptionsMenu()
-        : Menu(MF_SINGLESELECT | MF_ALLOW_FORMATTING
-                | MF_ARROWS_SELECT | MF_WRAP | MF_INIT_HOVER
-#ifdef USE_TILE_LOCAL
-                | MF_SPECIAL_MINUS // doll editor (why?)
-#endif
-                ),
+        : Menu(MF_SINGLESELECT | MF_ALLOW_FORMATTING | MF_WRAP | MF_INIT_HOVER | MF_ARROWS_SELECT),
           cmd(CMD_NO_CMD)
     {
         set_tag("options_menu");
@@ -2074,6 +2095,7 @@ public:
         set_title(new MenuEntry(
             string("<w>" CRAWL " ") + Version::Long + "</w>",
             MEL_TITLE));
+
         on_single_selection = [this](const MenuEntry& item)
         {
             const CmdMenuEntry *c = dynamic_cast<const CmdMenuEntry *>(&item);
@@ -2081,15 +2103,24 @@ public:
             {
                 if (c->uses_popup)
                 {
-                    // recurse
                     if (c->cmd != CMD_NO_CMD)
                         ::process_command(c->cmd, CMD_GAME_MENU);
                     return true;
                 }
-                // otherwise, exit menu and process in the main process_command call
                 cmd = c->cmd;
                 return false;
             }
+
+            auto* opt = dynamic_cast<const OptionEntry*>(&item);
+            if (opt)
+            {
+                const_cast<OptionEntry*>(opt)->toggle();
+                refresh_labels();
+                update_menu(true);
+                update_screen();
+                return true;
+            }
+
             return true;
         };
     }
@@ -2105,9 +2136,52 @@ public:
     {
         clear();
         add_entry(new CmdMenuEntry("Change Keybindings", MEL_ITEM, 'k', CMD_CHANGE_KEYBINDINGS));
-        add_entry(new MenuEntry("placeholder_option_1 = true", MEL_ITEM));
-        add_entry(new MenuEntry("placeholder_option_2 = false", MEL_ITEM));
-        add_entry(new MenuEntry("<lightgrey>Use arrow keys to navigate.</lightgrey>", MEL_ITEM));
+        add_entry(new OptionEntry("Option 1", &opt1));
+        add_entry(new OptionEntry("Option 2", &opt2));
+        add_entry(new OptionEntry("Option 3", &opt3));
+        add_entry(new MenuEntry("<lightgrey>Use arrow keys or mouse to select, press Enter/click to toggle.</lightgrey>", MEL_SUBTITLE));
+
+        refresh_labels();
+    }
+
+    bool process_key(int keyin) override
+    {
+        bool handled = Menu::process_key(keyin);
+
+        if (last_hovered != prev_hover)
+        {
+            prev_hover = last_hovered;
+            refresh_labels();
+            update_menu(true);
+            update_screen();
+        }
+
+        if (handled && keyin == '\r')
+        {
+            if (last_hovered >= 0 && last_hovered < (int)items.size())
+            {
+                auto* opt = dynamic_cast<OptionEntry*>(items[last_hovered]);
+                if (opt)
+                {
+                    opt->toggle();
+                    refresh_labels();
+                    update_menu(true);
+                    update_screen();
+                }
+            }
+        }
+
+        return handled;
+    }
+
+    void refresh_labels()
+    {
+        for (size_t i = 0; i < items.size(); ++i)
+        {
+            auto* opt = dynamic_cast<OptionEntry*>(items[i]);
+            if (opt)
+                opt->update_label((int)i == last_hovered);
+        }
     }
 
     vector<MenuEntry *> show(bool reuse_selections = false) override
@@ -2164,6 +2238,17 @@ public:
         return Menu::process_key(key);
     }
 };
+
+
+
+
+
+
+
+
+
+
+
 
 // Note that in some actions, you don't want to clear afterwards.
 // e.g. list_jewellery, etc.
