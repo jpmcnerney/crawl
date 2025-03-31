@@ -2038,17 +2038,156 @@ public:
 class OptionsEditMenu : public Menu
 {
 public:
+    struct OptionEntry : public MenuEntry
+    {
+        std::string name;
+        bool* value;
+
+        OptionEntry(const std::string& name, bool* val)
+            : MenuEntry("", MEL_ITEM), name(name), value(val)
+        {
+            update_label(false);
+        }
+
+        void toggle()
+        {
+            *value = !*value;
+        }
+
+        void update_label(bool hovered)
+        {
+            std::string box = *value ? "[x] " : "[ ] ";
+            std::string color = hovered ? "<white>" : "<lightgray>";
+            this->text = color + box + name + "</" + (hovered ? "white" : "lightgray") + ">";
+        }
+    };
+
+    bool opt1 = true;
+    bool opt2 = false;
+    bool opt3 = true;
+    int prev_hover = -1;
+
     OptionsEditMenu()
-        : Menu(MF_SINGLESELECT | MF_ALLOW_FORMATTING | MF_WRAP | MF_INIT_HOVER)
+        : Menu(MF_SINGLESELECT | MF_ALLOW_FORMATTING | MF_WRAP 
+               | MF_INIT_HOVER | MF_ARROWS_SELECT)
     {
         set_tag("options_menu");
         set_title(new MenuEntry("<w>Edit Game Options</w>", MEL_TITLE));
 
-        add_entry(new MenuEntry("placeholder_option_1 = true", MEL_ITEM));
-        add_entry(new MenuEntry("placeholder_option_2 = false", MEL_ITEM));
-        add_entry(new MenuEntry("<lightgrey>Use arrow keys to navigate.</lightgrey>", MEL_ITEM));
+        add_entry(new OptionEntry("Option 1", &opt1));
+        add_entry(new OptionEntry("Option 2", &opt2));
+        add_entry(new OptionEntry("Option 3", &opt3));
+        add_entry(new MenuEntry("Use arrow keys or mouse to select, press Enter/click to toggle.", MEL_SUBTITLE));
+
+        cycle_hover();     // ensure hover state is initialized
+        refresh_labels();  // make sure label colors match
+
+        // This handles left-click or Enter-press on an item
+        on_single_selection = [this](const MenuEntry& entry) {
+    // Find which entry was clicked
+    auto it = std::find_if(items.begin(), items.end(),
+                           [&](MenuEntry* e) { return e == &entry; });
+    if (it != items.end())
+    {
+        last_hovered = it - items.begin();
+        prev_hover = -1; // Force refresh
+        refresh_labels();
+        update_menu(true);
+        update_screen();
+    }
+
+    // Toggle the option
+    auto* opt = dynamic_cast<OptionEntry*>(const_cast<MenuEntry*>(&entry));
+    if (opt)
+    {
+        opt->toggle();
+        refresh_labels();
+        update_menu(true);
+        update_screen();
+    }
+    return true;
+};
+    on_single_selection = [this](const MenuEntry& entry) {
+        // Find which entry was clicked
+        auto it = std::find_if(items.begin(), items.end(),
+                            [&](MenuEntry* e) { return e == &entry; });
+        if (it != items.end())
+        {
+            last_hovered = it - items.begin();
+            prev_hover = -1; // Force refresh
+            refresh_labels();
+            update_menu(true);
+            update_screen();
+        }
+
+        // Toggle the option
+        auto* opt = dynamic_cast<OptionEntry*>(const_cast<MenuEntry*>(&entry));
+        if (opt)
+        {
+            opt->toggle();
+            refresh_labels();
+            update_menu(true);
+            update_screen();
+        }
+        return true;
+    };
+
+        
+    }
+
+    bool process_key(int keyin) override
+    {
+        bool handled = Menu::process_key(keyin);
+
+        // If arrow keys changed hovered item, refresh the labels
+        if (last_hovered != prev_hover)
+        {
+            prev_hover = last_hovered;
+            refresh_labels();
+            update_menu(true);
+            update_screen();
+        }
+
+        // If user pressed Enter on the hovered item, toggle it
+        if (handled && keyin == '\r')
+        {
+            if (last_hovered >= 0 && last_hovered < (int)items.size())
+            {
+                auto* opt = dynamic_cast<OptionEntry*>(items[last_hovered]);
+                if (opt)
+                {
+                    opt->toggle();
+                    refresh_labels();
+                    update_menu(true);
+                    update_screen();
+                }
+            }
+        }
+
+        return handled;
+    }
+
+    void refresh_labels()
+    {
+        for (size_t i = 0; i < items.size(); ++i)
+        {
+            auto* opt = dynamic_cast<OptionEntry*>(items[i]);
+            if (opt)
+                opt->update_label((int)i == last_hovered);
+        }
     }
 };
+
+
+
+
+
+
+
+
+
+
+
 
 
 // Note that in some actions, you don't want to clear afterwards.
