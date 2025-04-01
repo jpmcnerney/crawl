@@ -15,6 +15,7 @@
 #include <list>
 #include <sstream>
 #include <string>
+#include "keybindings.h"
 #include <utility> // pair
 #include <vector>
 #include <fcntl.h>
@@ -2035,9 +2036,25 @@ public:
     }
 };
 
-class OptionsEditMenu : public Menu
+class OptionsMenu : public Menu
 {
 public:
+    class CmdMenuEntry : public MenuEntry
+    {
+    public:
+        CmdMenuEntry(string label, MenuEntryLevel _level, int hotk=0,
+                     command_type _cmd=CMD_NO_CMD, bool _uses_popup=true)
+            : MenuEntry(label, _level, 1, hotk), cmd(_cmd),
+              uses_popup(_uses_popup)
+        {
+            if (tileidx_command(cmd) != TILEG_TODO)
+                add_tile(tileidx_command(cmd));
+        }
+
+        command_type cmd;
+        bool uses_popup;
+    };
+
     struct OptionEntry : public MenuEntry
     {
         std::string name;
@@ -2062,84 +2079,75 @@ public:
         }
     };
 
+    command_type cmd;
     bool opt1 = true;
     bool opt2 = false;
     bool opt3 = true;
     int prev_hover = -1;
 
-    OptionsEditMenu()
-        : Menu(MF_SINGLESELECT | MF_ALLOW_FORMATTING | MF_WRAP 
-               | MF_INIT_HOVER | MF_ARROWS_SELECT)
+    OptionsMenu()
+        : Menu(MF_SINGLESELECT | MF_ALLOW_FORMATTING | MF_WRAP | MF_INIT_HOVER | MF_ARROWS_SELECT),
+          cmd(CMD_NO_CMD)
     {
         set_tag("options_menu");
-        set_title(new MenuEntry("<w>Edit Game Options</w>", MEL_TITLE));
+        action_cycle = Menu::CYCLE_NONE;
+        menu_action  = Menu::ACT_EXECUTE;
+        set_title(new MenuEntry(
+            string("<w>" CRAWL " ") + Version::Long + "</w>",
+            MEL_TITLE));
 
+        on_single_selection = [this](const MenuEntry& item)
+        {
+            const CmdMenuEntry *c = dynamic_cast<const CmdMenuEntry *>(&item);
+            if (c)
+            {
+                if (c->uses_popup)
+                {
+                    if (c->cmd != CMD_NO_CMD)
+                        ::process_command(c->cmd, CMD_GAME_MENU);
+                    return true;
+                }
+                cmd = c->cmd;
+                return false;
+            }
+
+            auto* opt = dynamic_cast<const OptionEntry*>(&item);
+            if (opt)
+            {
+                const_cast<OptionEntry*>(opt)->toggle();
+                refresh_labels();
+                update_menu(true);
+                update_screen();
+                return true;
+            }
+
+            return true;
+        };
+    }
+
+    bool skip_process_command(int keyin) override
+    {
+        if (keyin == '?')
+            return true; // hotkeyed
+        return Menu::skip_process_command(keyin);
+    }
+
+    void fill_entries()
+    {
+        clear();
+        add_entry(new CmdMenuEntry("Change Keybindings", MEL_ITEM, 'k', CMD_CHANGE_KEYBINDINGS));
         add_entry(new OptionEntry("Option 1", &opt1));
         add_entry(new OptionEntry("Option 2", &opt2));
         add_entry(new OptionEntry("Option 3", &opt3));
-        add_entry(new MenuEntry("Use arrow keys or mouse to select, press Enter/click to toggle.", MEL_SUBTITLE));
+        add_entry(new MenuEntry("<lightgrey>Use arrow keys or mouse to select, press Enter/click to toggle.</lightgrey>", MEL_SUBTITLE));
 
-        cycle_hover();     // ensure hover state is initialized
-        refresh_labels();  // make sure label colors match
-
-        // This handles left-click or Enter-press on an item
-        on_single_selection = [this](const MenuEntry& entry) {
-    // Find which entry was clicked
-    auto it = std::find_if(items.begin(), items.end(),
-                           [&](MenuEntry* e) { return e == &entry; });
-    if (it != items.end())
-    {
-        last_hovered = it - items.begin();
-        prev_hover = -1; // Force refresh
         refresh_labels();
-        update_menu(true);
-        update_screen();
-    }
-
-    // Toggle the option
-    auto* opt = dynamic_cast<OptionEntry*>(const_cast<MenuEntry*>(&entry));
-    if (opt)
-    {
-        opt->toggle();
-        refresh_labels();
-        update_menu(true);
-        update_screen();
-    }
-    return true;
-};
-    on_single_selection = [this](const MenuEntry& entry) {
-        // Find which entry was clicked
-        auto it = std::find_if(items.begin(), items.end(),
-                            [&](MenuEntry* e) { return e == &entry; });
-        if (it != items.end())
-        {
-            last_hovered = it - items.begin();
-            prev_hover = -1; // Force refresh
-            refresh_labels();
-            update_menu(true);
-            update_screen();
-        }
-
-        // Toggle the option
-        auto* opt = dynamic_cast<OptionEntry*>(const_cast<MenuEntry*>(&entry));
-        if (opt)
-        {
-            opt->toggle();
-            refresh_labels();
-            update_menu(true);
-            update_screen();
-        }
-        return true;
-    };
-
-        
     }
 
     bool process_key(int keyin) override
     {
         bool handled = Menu::process_key(keyin);
 
-        // If arrow keys changed hovered item, refresh the labels
         if (last_hovered != prev_hover)
         {
             prev_hover = last_hovered;
@@ -2148,7 +2156,6 @@ public:
             update_screen();
         }
 
-        // If user pressed Enter on the hovered item, toggle it
         if (handled && keyin == '\r')
         {
             if (last_hovered >= 0 && last_hovered < (int)items.size())
@@ -2176,8 +2183,61 @@ public:
                 opt->update_label((int)i == last_hovered);
         }
     }
+
+    vector<MenuEntry *> show(bool reuse_selections = false) override
+    {
+        fill_entries();
+        return Menu::show(reuse_selections);
+    }
 };
 
+class KeybindingMenu : public Menu
+{
+public:
+    class CmdMenuEntry : public MenuEntry
+    {
+    public:
+        CmdMenuEntry(string label, MenuEntryLevel _level, int hotk=0,
+                                                command_type _cmd=CMD_NO_CMD,
+                                                bool _uses_popup=true)
+            : MenuEntry(label, _level, 1, hotk), cmd(_cmd),
+            uses_popup(_uses_popup)
+        {
+            if (tileidx_command(cmd) != TILEG_TODO)
+                add_tile(tileidx_command(cmd));
+        }
+
+        command_type cmd;
+        bool uses_popup;
+    };
+
+    KeybindingMenu()
+        : Menu(MF_SINGLESELECT | MF_ALLOW_FORMATTING | MF_WRAP | MF_INIT_HOVER)
+    {
+        set_tag("keybinding_menu");
+        set_title(new MenuEntry("<w>Change Movement Keybindings</w>", MEL_TITLE));
+
+        for (size_t i = 0; i < movement_keys.size(); i++)
+        {
+            int index = 1 + i;
+            std::string entry_text = movement_keys[i].action + " -> [" + movement_keys[i].key + "]";
+            add_entry(new CmdMenuEntry(entry_text, MEL_ITEM, index, CMD_NO_CMD));
+        }
+
+        add_entry(new MenuEntry("<lightgrey>Press number to change, ESC to exit.</lightgrey>", MEL_ITEM));
+    }
+
+    bool process_key(int key) override
+    {
+        if (key >= '1' && key <= '8')
+        {
+            int index = key - '1';
+            change_keybinding(index);
+            return true;
+        }
+        return Menu::process_key(key);
+    }
+};
 
 
 
@@ -2214,11 +2274,18 @@ void process_command(command_type cmd, command_type prev_cmd)
     case CMD_EDIT_PLAYER_TILE: tiles.draw_doll_edit(); break;
 #endif
 
-        //cool command
-    case CMD_EDIT_OPTIONS:
+    case CMD_EDIT_OPTIONS: // This now correctly opens the options menu
     {
-        OptionsEditMenu m;
-        m.show();
+        OptionsMenu options_menu;
+        options_menu.show();
+        redraw_screen();
+        update_screen();
+        break;
+    }
+    case CMD_CHANGE_KEYBINDINGS:
+    { 
+        KeybindingMenu menu;
+        menu.show();
         redraw_screen();
         update_screen();
         break;
